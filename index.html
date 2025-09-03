@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Web Page</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="script.js" defer></script>
+    <script src="askbox.js" defer></script>
+</head>
+<body>
+    <div id="container">
+        <div id="app">
+            <div id="route-view">
+                <div id="route-info">
+                    <h2 id="route-name">No Route Selected</h2>
+                    <p><span id="route-departure">Departure: 00:00:00</span>
+                        <span><a class="toggle-button" href="javascript:editCurrentRouteDeparture()">Edit</a></span></p>
+                    <p id="route-id"></p>
+                </div>
+                <div id="route-timelines">
+
+                </div>
+            </div>
+            <div id="station-view">
+                <div id="station-info">
+                    <h2 id="station-name">No Station Selected</h2>
+                    <p id="station-id"></p>
+                </div>
+                <canvas id="station-canvas">Not supported.</canvas>
+            </div>
+        </div>
+        <div id="sidebar">
+            <div class="sidebar-header">
+                <h3>Global Config</h3>
+                <a href="javascript:editGlobalConfig();" class="toggle-button" id="globalConfigToggle">...</a>
+            </div>
+            <div id="global-config">
+                <span id="cfg-mint">Min time:</span><br/>
+                <span id="cfg-maxt">Max time:</span><br/>
+                <p><a class="toggle-button" href="javascript:saveData()">Save</a>
+                <a class="toggle-button" href="javascript:loadData()">Load</a></p>
+            </div>
+            <div class="sidebar-header">
+                <h3>Routes</h3>
+                <a href="javascript:toggleRouteList();" class="toggle-button" id="routeListToggle">▲</a>
+            </div>
+            <div id="routeList">(None)</div>
+            <div class="sidebar-header">
+                <h3>Stations</h3>
+                <a href="javascript:toggleStationList();" class="toggle-button" id="stationListToggle">▲</a>
+            </div>
+            <div id="stationList">(None)</div>
+        </div>
+    </div>
+    <div id="shadow"></div>
+    <div id="askbox">
+        <div id="askbox-header">
+            <span id="askbox-title"></span>
+        </div>
+        <div id="askbox-body">
+            <p><span>Start time: </span><input id="start-time" type="text" placeholder="00:00:00"/></p>
+            <p><span>Interval: </span><input id="interval-time" type="text" placeholder="00:00:00"/></p>
+            <p><span>Repeat count: </span><input id="repeat-count" type="text" placeholder="1000"/></p>
+        </div>
+        <div id="askbox-footer">
+            <a class="secondary-button" href="javascript:askboxCancel()">Cancel</a>
+            <a class="toggle-button" href="javascript:askboxConfirm()">Confirm</a>
+        </div>
+    </div>
+</body>
+</html>
