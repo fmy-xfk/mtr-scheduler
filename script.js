@@ -71,14 +71,17 @@ class Route {
      * @param {number[]} durations 
      * @param {Platform[]} stations 
      * @param {number} color
+     * @param {string[]} depots
      */
-    constructor(id, name, number, durations, stations, color) {
+    constructor(id, name, number, type, durations, stations, color, depots) {
         this.id = id;
         this.name = name;
         this.number = number;
+        this.type = type;
         this.durations = durations;
         this.stations = stations;
         this.color = color;
+        this.depots = depots;
         this.setStartTime([0, 15 * 60 * 1000, 30 * 60 * 1000, 45 * 60 * 1000]); // Default start times: every 15 minutes
     }
 
@@ -91,20 +94,33 @@ class Route {
      * @param {number[]} time 
      */
     setStartTime(time) {
-        this.startTime = time;
+        this.startTime = [];
         this.timelines = [];
         time.forEach((t) => {
+            let in_range = false;
             let currentTime = t;
             let timeline = [];
             this.stations.forEach((platform, index) => {
                 let departureTime = currentTime + platform.dwellTime;
+                if (departureTime > 86400000) {
+                    departureTime %= 86400000;
+                }
                 timeline.push([currentTime, departureTime]);
                 currentTime = departureTime;
                 if (index < this.durations.length) {
                     currentTime += this.durations[index];
+                    if (currentTime > 86400000) {
+                        currentTime %= 86400000;
+                    }
+                }
+                if (currentTime >= MINT && currentTime <= MAXT) {
+                    in_range = true;
                 }
             });
-            this.timelines.push(timeline);
+            if(in_range) {
+                this.startTime.push(t);
+                this.timelines.push(timeline);
+            }
         });
     }
 
@@ -155,6 +171,7 @@ function initStations(data) {
  */
 function initRoutes(data) {
     let routes = {};
+    let depots = {};
     data.forEach((route) => {
         let platforms = [];
         route.stations.forEach((platform) => {
@@ -168,17 +185,26 @@ function initRoutes(data) {
             );
             platforms.push(newPlatform);
         });
+        route.depots.forEach((depot) => {
+            if(!depots[depot]){
+                depots[depot] = [route.id];
+            }else{
+                depots[depot].push(route.id);
+            }
+        });
         let newRoute = new Route(
             route.id,
             route.name,
             route.number,
+            route.type,
             route.durations,
             platforms,
-            route.color
+            route.color,
+            route.depots
         );
         routes[route.id] = newRoute;
     });
-    return routes;
+    return [routes, depots];
 }
 
 /** @type {StationDict} */
@@ -186,6 +212,9 @@ var Stations = {};
 
 /** @type {RouteDict} */
 var Routes = {};
+
+/** @type {{[key: string]: string[]}} */
+var Depots = {};
 
 function toggleRouteList() {
     const routeListToggle = document.getElementById("routeListToggle");
@@ -218,6 +247,7 @@ function parseTime(timeInt) {
 
 const routeView = document.getElementById("route-view");
 const stationView = document.getElementById("station-view");
+const depotView = document.getElementById("depot-view");
 
 /**
  * Sets the selected route and updates the UI.
@@ -226,8 +256,19 @@ const stationView = document.getElementById("station-view");
 function setRoute(routeId) {
     routeView.style.display = "block";
     stationView.style.display = "none";
+    depotView.style.display = "none";
     const route = Routes[routeId];
     const routeName = document.getElementById("route-name");
+    const routeDepots = document.getElementById("route-depots");
+    let routeDepotsHTML = "";
+    route.depots.forEach((depot) => {
+        routeDepotsHTML += `<li><a class="depot-item-link" href="javascript:setDepot('${depot}')">${depot}</a></li>`;
+    });
+    if (route.depots.length > 0) {
+        routeDepots.innerHTML = `Depot(s): <ul>${routeDepotsHTML}</ul>`;
+    } else {
+        routeDepots.innerHTML = "Depot(s): (None)";
+    }
     document.getElementById('route-id').innerHTML = routeId;
     routeName.innerHTML = `${route.name} (${route.number})`;
     const routeDeparture = document.getElementById("route-departure");
@@ -260,6 +301,21 @@ function setRoute(routeId) {
     tabelHTML += "</table>";
 
     routeTimelines.innerHTML = tabelHTML;
+}
+
+function setDepot(DepotName) {
+    routeView.style.display = "none";
+    stationView.style.display = "none";
+    depotView.style.display = "block";
+    const depotName = document.getElementById("depot-name");
+    depotName.innerHTML = `Depot: ${DepotName}`;
+    const depotRoutes = document.getElementById("depot-routes");
+    let html = "";
+    Depots[DepotName].forEach((routeId) => {
+        const route = Routes[routeId];
+        html += `<p><a class="route-item-link" href="javascript:setRoute('${route.id}')">${route.name} (${route.number})</a></p>`;
+    });
+    depotRoutes.innerHTML = html;
 }
 
 const cvs = document.getElementById("station-canvas");
@@ -347,6 +403,7 @@ function cvs_repaint(platforms = null) {
 function setStation(stationId) {
     routeView.style.display = "none";
     stationView.style.display = "flex";
+    depotView.style.display = "none";
     const station = Stations[stationId];
     const stationName = document.getElementById("station-name");
     stationName.innerHTML = `${station.name}`;
@@ -418,12 +475,14 @@ function onRouteDepartureEdited(ret) {
     const route = Routes[routeId];
     let st = [];
     let t = startTime;
-    while (t < MAXT && repeats > 0) {
-        if (t >= MINT) {
+    for(let i = 0; i < repeats; i++) {
+        if(st.indexOf(t) === -1) {
             st.push(t);
         }
         t += interval;
-        repeats--;
+        if (t >= 86400000) {
+            t %= 86400000;
+        }
     }
     route.setStartTime(st);
     askboxCancel();
@@ -483,22 +542,22 @@ function editGlobalConfig() {
 
 function refreshT() {
     document.getElementById("cfg-mint").innerHTML="Min time: " + parseTime(MINT);
-    document.getElementById("cfg-maxt").innerHTML="Min time: " + parseTime(MAXT);
+    document.getElementById("cfg-maxt").innerHTML="Max time: " + parseTime(MAXT);
 }
 
 function refreshAll(stations, routes) {
     refreshT();
 
     Stations = initStations(stations);
-    Routes = initRoutes(routes);
+    [Routes, Depots] = initRoutes(routes);
 
     StationList.innerHTML = "";
-    Object.values(Stations).forEach((station) => {
+    Object.values(Stations).sort((a, b) => a.name.localeCompare(b.name)).forEach((station) => {
         StationList.appendChild(station.createElement());
     });
 
     RouteList.innerHTML = "";
-    Object.values(Routes).forEach((route) => {
+    Object.values(Routes).sort((a, b) => a.name.localeCompare(b.name)).forEach((route) => {
         RouteList.appendChild(route.createElement());
     });
 }
@@ -557,4 +616,27 @@ fetch(`http://${MTR_URL}/mtr/api/map/stations-and-routes?dimension=0`).then((res
 }).catch(err=>{
     alert("Minecraft MTR server is not on, or the address is wrong.\nPlease load a file from your disk as an alternative.");
     shadow0.style.display = "none";
+}).then(() => {
+    // fetch(`http://${MTR_URL}/mtr/api/map/departures`).then((response) => {
+    //     return response.json();
+    // }).then((data) => {
+    //     if (data.code !== 200) {
+    //         alert("Failed to fetch data from server.");
+    //         return;
+    //     }
+    //     const T = data.data.cachedResponseTime;
+    //     data.data.departures.forEach((deps) => {
+    //         const routeId = deps.id;
+    //         const deptimes = [];
+    //         deps.departures.forEach((dep) => {
+    //             const deviation = dep.deviation || 0;
+    //             const times = dep.departures.map((t) => (T + t) % 86400000);
+    //             deptimes.push(...times);
+    //         });
+    //         deptimes.sort((a, b) => a - b);
+    //         console.log(`Route ${Routes[routeId].name} has ${deptimes.map(parseTime)} departures.`);
+    //         Routes[routeId].setStartTime(deptimes);
+    //     });
+
+    // });
 });

@@ -28,11 +28,12 @@ body, html {
     text-align: left;
     height: 100%;
     padding: 10px;
+    min-width: 250px;
     width: 300px;
     overflow-y: auto;
 }
 
-#route-view, #station-view {
+#route-view, #station-view, #depot-view {
     display: none;
     height: 100%;
 }
@@ -93,7 +94,7 @@ body, html {
     border-bottom: black 1px solid;
 }
 
-.route-item-link, .station-item-link {
+.route-item-link, .station-item-link, .depot-item-link {
     text-decoration: none;
     color: black;
     padding: 5px;
@@ -102,11 +103,11 @@ body, html {
     margin-left: 5px;
 }
 
-.route-item-link:hover, .station-item-link:hover {
+.route-item-link:hover, .station-item-link:hover, .depot-item-link:hover {
     background-color: #d0d0d0;
 }
 
-.route-item-link:active, .station-item-link:active {
+.route-item-link:active, .station-item-link:active, .depot-item-link:active {
     background-color: #a0a0a0;
 }
 
