@@ -205,3 +205,30 @@ body, html {
     text-align: right;
     border-top: 1px solid #7f7f7f;
 }
+
+#issue-list li {
+    margin-bottom: 5px;
+    line-height: 1.5em;
+    list-style-type: none;
+}
+
+.issue-error {
+    color: red;
+    font-weight: bold;
+    ::before {
+        content: "● ";
+        color: red;
+        font-size: 1em;
+        vertical-align: middle;
+    }
+}
+
+.issue-warning {
+    color: rgb(187, 121, 0);
+    ::before {
+        content: "● ";
+        color: rgb(187, 121, 0);
+        font-size: 1em;
+        vertical-align: middle;
+    }
+}

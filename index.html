@@ -11,12 +11,19 @@
 <body>
     <div id="container">
         <div id="app">
+            <div id="issue-view">
+                <h2 id="issue-name">Issues</h2>
+                <ul id="issue-list">
+                    <li>(None)</li>
+                </ul>
+            </div>
             <div id="route-view">
                 <div id="route-info">
                     <h2 id="route-name">No Route Selected</h2>
                     <p><span id="route-depots">Depot(s): (None)</span></p>
                     <p><span id="route-departure">Departure: 00:00:00</span>
-                        <span><a class="toggle-button" href="javascript:editCurrentRouteDeparture()">Edit</a></span></p>
+                        <span><a class="toggle-button" href="javascript:editCurrentRouteDeparture()">Edit</a></span>
+                        <span><a class="toggle-button" href="javascript:setDepartureFollows()">Follow</a></span></p>
                     <p id="route-id"></p>
                 </div>
                 <div id="route-timelines">
@@ -48,7 +55,8 @@
                 <span id="cfg-mint">Min time:</span><br/>
                 <span id="cfg-maxt">Max time:</span><br/>
                 <p><a class="toggle-button" href="javascript:saveData()">Save</a>
-                <a class="toggle-button" href="javascript:loadData()">Load</a></p>
+                <a class="toggle-button" href="javascript:loadData()">Load</a>
+                <a class="toggle-button" href="javascript:checkData()">Check</a></p>
             </div>
             <div class="sidebar-header">
                 <h3>Routes</h3>

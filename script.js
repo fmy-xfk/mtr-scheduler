@@ -82,7 +82,7 @@ class Route {
         this.stations = stations;
         this.color = color;
         this.depots = depots;
-        this.setStartTime([0, 15 * 60 * 1000, 30 * 60 * 1000, 45 * 60 * 1000]); // Default start times: every 15 minutes
+        this.setStartTime([0]); // Default start time at 00:00:00
     }
 
     getColorStr() {
@@ -94,10 +94,10 @@ class Route {
      * @param {number[]} time 
      */
     setStartTime(time) {
+        time.sort((a, b) => a % 86400000 - b % 86400000);
         this.startTime = [];
         this.timelines = [];
         time.forEach((t) => {
-            let in_range = false;
             let currentTime = t;
             let timeline = [];
             this.stations.forEach((platform, index) => {
@@ -113,15 +113,32 @@ class Route {
                         currentTime %= 86400000;
                     }
                 }
-                if (currentTime >= MINT && currentTime <= MAXT) {
-                    in_range = true;
-                }
             });
-            if(in_range) {
-                this.startTime.push(t);
-                this.timelines.push(timeline);
-            }
+            this.startTime.push(t);
+            this.timelines.push(timeline);
         });
+    }
+
+    getArrivalTime() {
+        if (this.timelines.length === 0) {
+            return 0;
+        }
+        if (this.timelines[0].length === this.durations.length) {
+            return this.timelines.map(timeline => timeline[timeline.length - 1][1] + this.stations[this.stations.length - 1].dwellTime);
+        }else{
+            return this.timelines.map(timeline => timeline[timeline.length - 1][0]);   
+        }
+    }
+
+    getDuration() {
+        let t = 0;
+        for (let i = 0; i < this.durations.length; i++) {
+            t += this.durations[i];
+        }
+        for (let i = 0; i < this.stations.length; i++) {
+            t += this.stations[i].dwellTime;
+        }
+        return t;
     }
 
     createElement() {
@@ -216,6 +233,8 @@ var Routes = {};
 /** @type {{[key: string]: string[]}} */
 var Depots = {};
 
+var FollowRelations = [];
+
 function toggleRouteList() {
     const routeListToggle = document.getElementById("routeListToggle");
     if (RouteList.style.display === "none") {
@@ -239,15 +258,17 @@ function toggleStationList() {
 }
 
 function parseTime(timeInt) {
-    const seconds = Math.floor(timeInt / 1000) % 60;
-    const minutes = Math.floor(timeInt / (1000 * 60)) % 60;
-    const hours = Math.floor(timeInt / (1000 * 60 * 60)) % 24;
+    timeInt /= 1000;
+    const seconds = Math.floor(timeInt % 60);
+    const minutes = Math.floor((timeInt / 60) % 60);
+    const hours = Math.floor((timeInt / 3600) % 24);
     return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
 }
 
 const routeView = document.getElementById("route-view");
 const stationView = document.getElementById("station-view");
 const depotView = document.getElementById("depot-view");
+const issueView = document.getElementById("issue-view");
 
 /**
  * Sets the selected route and updates the UI.
@@ -257,6 +278,7 @@ function setRoute(routeId) {
     routeView.style.display = "block";
     stationView.style.display = "none";
     depotView.style.display = "none";
+    issueView.style.display = "none";
     const route = Routes[routeId];
     const routeName = document.getElementById("route-name");
     const routeDepots = document.getElementById("route-depots");
@@ -271,11 +293,10 @@ function setRoute(routeId) {
     }
     document.getElementById('route-id').innerHTML = routeId;
     routeName.innerHTML = `${route.name} (${route.number})`;
-    const routeDeparture = document.getElementById("route-departure");
-    const parsedTime = route.startTime.map((t) => parseTime(t)).join(", ")
-    routeDeparture.innerHTML = `Departure Time: ${parsedTime}`;
-
+    
     const routeTimelines = document.getElementById("route-timelines");
+    const filteredStartTime = [];
+    var added = false;
     
     let tabelHTML = "<table class='timeline-table'>";
     route.stations.forEach((platform, index) => {
@@ -286,9 +307,14 @@ function setRoute(routeId) {
 
         route.startTime.forEach((startTime, timelineIndex) => {
             const this_timeline = route.timelines[timelineIndex];
-            let [currentTime, departureTime] = this_timeline[index];
-            tabelHTML += `<td><span class="timeline-time">${parseTime(currentTime)} - ${parseTime(departureTime)}</span></td>`;
+            if(this_timeline[0][0] < MAXT && this_timeline[this_timeline.length - 1][1] > MINT) {
+                let [currentTime, departureTime] = this_timeline[index];
+                tabelHTML += `<td><span class="timeline-time">${parseTime(currentTime)} - ${parseTime(departureTime)}</span></td>`;
+                if(!added) {filteredStartTime.push(startTime);}
+            }
         });
+
+        if(filteredStartTime.length > 0) {added = true;}
         
         tabelHTML += `</tr>`
 
@@ -301,12 +327,31 @@ function setRoute(routeId) {
     tabelHTML += "</table>";
 
     routeTimelines.innerHTML = tabelHTML;
+
+    const routeDeparture = document.getElementById("route-departure");
+    
+    const following = FollowRelations.filter(rel => rel.to === routeId).map(rel => rel.from);
+    const followedby = FollowRelations.filter(rel => rel.from === routeId).map(rel => rel.to);
+    if (following.length > 0) {
+        routeDeparture.innerHTML = `Following <a href="javascript:setRoute('${following[0]}')" class="route-item-link">${Routes[following[0]].name}</a>`;
+    } else {
+        const parsedTime = filteredStartTime.map((t) => parseTime(t)).join(", ")
+        routeDeparture.innerHTML = `Departure Time: ${parsedTime}.`;
+        if (followedby.length > 0) {
+            routeDeparture.innerHTML += " Followed by ";
+            followedby.forEach((routeId) => {
+                routeDeparture.innerHTML += `<a href="javascript:setRoute('${routeId}')" class="route-item-link">${Routes[routeId].name}</a>`;
+            });
+        }
+    }
+    
 }
 
 function setDepot(DepotName) {
     routeView.style.display = "none";
     stationView.style.display = "none";
     depotView.style.display = "block";
+    issueView.style.display = "none";
     const depotName = document.getElementById("depot-name");
     depotName.innerHTML = `Depot: ${DepotName}`;
     const depotRoutes = document.getElementById("depot-routes");
@@ -327,6 +372,7 @@ function cvs_repaint(platforms = null) {
     } else {
         _cur_platforms = platforms;
     }
+
     const ctx = cvs.getContext("2d");
 
     var devicePixelRatio = window.devicePixelRatio || 1;
@@ -380,34 +426,37 @@ function cvs_repaint(platforms = null) {
         platforms[platformName].forEach((entry) => {
             const routeId = entry.routeId;
             const routeNumber = Routes[routeId].number;
-            const times = entry.times;
+            const times = entry.times.filter(range => range[0] < MAXT && range[1] > MINT);
+            const isFirstStop = entry.isFirstStop;
+            const isLastStop = entry.isLastStop;
+            var isFollowingRoute = FollowRelations.some(rel => rel.to === routeId);
+            var isFollowedRoute = FollowRelations.some(rel => rel.from === routeId);
+            if (isFirstStop && isFollowingRoute) {
+                return;
+            }
             times.forEach((range) => {
-                let l = scale(range[0]), r = scale(range[1]);
-                if (range[0] < MAXT && range[1] > MINT) {
-                    ctx.fillStyle = "#" + Routes[routeId].getColorStr();
-                    ctx.fillRect(l, Y - 8, r - l, 8);
-                    ctx.font = '14px Arial';
-                    ctx.fillStyle = "rgb(0,0,0)";
-                    ctx.fillText(routeNumber, l, Y + 14)
+                if(isFollowingRoute && isFirstStop) {
+                    return;
                 }
+                let l = scale(range[0]), r = scale(range[1]);
+                ctx.fillStyle = "#" + Routes[routeId].getColorStr();
+                ctx.fillRect(l, Y - 8, r - l, 8);
+                ctx.font = '14px Arial';
+                ctx.fillStyle = "rgb(0,0,0)";
+                var text = routeNumber;
+                if(isFollowedRoute && isLastStop) {
+                    var followings = FollowRelations.filter(rel => rel.from === routeId).map(rel => Routes[rel.to].number);
+                    text += "/" + followings.join("/");
+                }
+                ctx.fillText(text, l, Y + 14);
             })
         });
         i += 1;
     });
 }
 
-/**
- * Sets the selected station and updates the UI.
- * @param {string} stationId 
- */
-function setStation(stationId) {
-    routeView.style.display = "none";
-    stationView.style.display = "flex";
-    depotView.style.display = "none";
-    const station = Stations[stationId];
-    const stationName = document.getElementById("station-name");
-    stationName.innerHTML = `${station.name}`;
 
+function gatherPlatforms(stationId) {
     const platforms = {};
     
     Object.values(Routes).forEach((route) => {
@@ -419,13 +468,73 @@ function setStation(stationId) {
                 platforms[platform.name].push({
                     routeId: route.id,
                     routeName: route.name,
-                    times: route.timelines.map((timeline) => timeline[index]) // Arrival times at this platform
+                    times: route.timelines.map((timeline) => timeline[index]), // Arrival times at this platform
+                    isFirstStop: route.stations[0].id === platform.id && route.stations[0].name === platform.name,
+                    isLastStop: route.stations[route.stations.length - 1].id === platform.id && route.stations[route.stations.length - 1].name === platform.name,
                 })
             }
         });
     });
+    return platforms;
+}
 
-    cvs_repaint(platforms);
+function checkStation(stationId) {
+    const platforms = gatherPlatforms(stationId);
+    let issues = [];
+    Object.keys(platforms).forEach((platformName) => {
+        const entries = platforms[platformName];
+        let allTimes = [];
+        entries.forEach((entry) => {
+            var isFollowingRoute = FollowRelations.some(rel => rel.to === entry.routeId);
+            var isFollowedRoute = FollowRelations.some(rel => rel.from === entry.routeId);
+            entry.times.forEach((range) => {
+                if(isFollowingRoute && entry.isFirstStop) {
+                    return;
+                }
+                if(range[0] < MAXT && range[1] > MINT) {
+                    allTimes.push({
+                        routeId: entry.routeId,
+                        start: range[0],
+                        end: range[1],
+                    });
+                }
+            });
+        });
+        allTimes.sort((a, b) => a.start - b.start);
+        for(let i = 1; i < allTimes.length; i++) {
+            if(allTimes[i].start < allTimes[i - 1].end) {
+                issues.push({
+                    type: "error",
+                    message: `Platform ${platformName} has conflict between route %${allTimes[i - 1].routeId}% (${parseTime(allTimes[i - 1].start)} - ${parseTime(allTimes[i - 1].end)})` +
+                    ` and route %${allTimes[i].routeId}% (${parseTime(allTimes[i].start)} - ${parseTime(allTimes[i].end)})`,
+                    stationId: stationId,
+                });
+            }else if(allTimes[i].start - allTimes[i - 1].end < 60000) {
+                issues.push({
+                    type: "warning",
+                    message: `Platform ${platformName} has very short gap (<60s) between route %${allTimes[i - 1].routeId}% (${parseTime(allTimes[i - 1].start)} - ${parseTime(allTimes[i - 1].end)})` +
+                        ` and route %${allTimes[i].routeId}% (${parseTime(allTimes[i].start)} - ${parseTime(allTimes[i].end)})`,
+                    stationId: stationId,
+                });
+            }
+        }
+    });
+    return issues;
+}
+
+/**
+ * Sets the selected station and updates the UI.
+ * @param {string} stationId 
+ */
+function setStation(stationId) {
+    routeView.style.display = "none";
+    stationView.style.display = "flex";
+    depotView.style.display = "none";
+    issueView.style.display = "none";
+    const station = Stations[stationId];
+    const stationName = document.getElementById("station-name");
+    stationName.innerHTML = `${station.name}`;
+    cvs_repaint(gatherPlatforms(stationId));
 }
 
 window.addEventListener("resize", () => {
@@ -487,6 +596,13 @@ function onRouteDepartureEdited(ret) {
     route.setStartTime(st);
     askboxCancel();
     setRoute(routeId);
+
+    FollowRelations.forEach(relation => {
+        if(relation.from === routeId) {
+            const toRoute = Routes[relation.to];
+            toRoute.setStartTime(route.getArrivalTime());
+        }
+    });
 }
 
 function editCurrentRouteDeparture() {
@@ -509,6 +625,55 @@ function editCurrentRouteDeparture() {
         placeholder: "1000",
         default: "1000",
     }], onRouteDepartureEdited);
+}
+
+function addFollowRelation(from, to) {
+    FollowRelations = FollowRelations.filter(r => r.to !== from);
+    FollowRelations.push({from: from, to: to});
+    const fromRoute = Routes[from];
+    const toRoute = Routes[to];
+    toRoute.setStartTime(fromRoute.getArrivalTime());
+    setRoute(toRoute.id);
+}
+
+function findRouteToFollow(routeID) {
+    const route = Routes[routeID];
+    return Object.values(Routes).filter(r => {
+        return r.id !== route.id && r.depots.some(depot => route.depots.includes(depot)) && 
+            r.stations[r.stations.length - 1].id === route.stations[0].id &&
+            r.stations[r.stations.length - 1].name === route.stations[0].name
+    }).map(route => route.id);
+}
+
+function onRouteDepartureEdited2(ret) {
+    const followId = ret["follow"];
+    if(!Routes[followId]) {
+        alert("Invalid route selected!");
+        return;
+    }
+    addFollowRelation(followId, document.getElementById('route-id').innerHTML);
+}
+
+function setDepartureFollows() {
+    const routeId = document.getElementById('route-id').innerHTML;
+    const route = Routes[routeId];
+    const title = "Set departure follows: " + route.name;
+    const options = findRouteToFollow(routeId).map(routeID => ({
+            id: routeID,
+            text: Routes[routeID].name
+        }));
+
+    if(options.length === 0) {
+        alert("No available routes to follow!");
+        return;
+    }
+        
+    askboxShow(title, [{
+        id: "follow",
+        name: "Follow",
+        type: "combo",
+        options: options,
+    }], onRouteDepartureEdited2);
 }
 
 function onGlobalConfigEdited(ret) {
@@ -545,12 +710,23 @@ function refreshT() {
     document.getElementById("cfg-maxt").innerHTML="Max time: " + parseTime(MAXT);
 }
 
+function initFollowRelations() {
+    FollowRelations = [];
+    Object.values(Routes).forEach(route => {
+        const followRoutes = findRouteToFollow(route.id);
+        if(followRoutes.length > 0) {
+            addFollowRelation(followRoutes[0], route.id);
+        }
+    });
+
+}
+
 function refreshAll(stations, routes) {
     refreshT();
 
     Stations = initStations(stations);
     [Routes, Depots] = initRoutes(routes);
-
+    
     StationList.innerHTML = "";
     Object.values(Stations).sort((a, b) => a.name.localeCompare(b.name)).forEach((station) => {
         StationList.appendChild(station.createElement());
@@ -601,6 +777,58 @@ function loadData() {
     return;
 }
 
+/** 
+ * Translate message 
+ * @param {string} msg - The message to translate
+*/
+function transMsg(msg) {
+    let tokenPos = msg.indexOf('%');
+    while (tokenPos >= 0) {
+        let nextTokenPos = msg.indexOf('%', tokenPos + 1);
+        if (nextTokenPos < 0) {
+            console.error(`Bad tokens ${msg}`);
+        }
+        let routeid = msg.substring(tokenPos + 1, nextTokenPos);
+        msg = msg.replaceAll("%"+routeid+"%", `<a href="javascript:setRoute('${routeid}')" class='route-item-link'>${Routes[routeid].name}</a>`);
+        tokenPos = msg.indexOf('%');
+    }
+    return msg;
+}
+
+function checkData() {
+    routeView.style.display = "none";
+    stationView.style.display = "none";
+    depotView.style.display = "none";
+    issueView.style.display = "block";
+
+    let issues = [];
+    Object.keys(Stations).forEach(stationId => {
+        issues = issues.concat(checkStation(stationId));
+    });
+    const issueList = document.getElementById("issue-list");
+    issueList.innerHTML = "";
+    if(issues.length === 0) {
+        issueList.innerHTML = "<li>(None)</li>";
+    } else {
+        issues.filter(issue => issue.type === "error").forEach(issue => {
+            issueList.innerHTML += `<li class="issue-${issue.type}">` +
+                `<a class="station-item-link" href="javascript:setStation('${issue.stationId}')">${Stations[issue.stationId].name}</a>` + 
+                `   <span>${transMsg(issue.message)}</span></li>`;
+        });
+        issues.filter(issue => issue.type === "warning").forEach(issue => {
+            issueList.innerHTML += `<li class="issue-${issue.type}">` +
+                `<a class="station-item-link" href="javascript:setStation('${issue.stationId}')">${Stations[issue.stationId].name}</a>` + 
+                `   <span>${transMsg(issue.message)}</span></li>`;
+        });
+        issues.filter(issue => issue.type !== "error" && issue.type !== "warning").forEach(issue => {
+            issueList.innerHTML += `<li class="issue-${issue.type}">` +
+                `<a class="station-item-link" href="javascript:setStation('${issue.stationId}')">${Stations[issue.stationId].name}</a>` + 
+                `   <span>${transMsg(issue.message)}</span></li>`;
+        });
+    }
+
+}
+
 const shadow0 = document.getElementById('shadow');
 shadow0.style.display = "block";
 fetch(`http://${MTR_URL}/mtr/api/map/stations-and-routes?dimension=0`).then((response) => {
@@ -617,26 +845,26 @@ fetch(`http://${MTR_URL}/mtr/api/map/stations-and-routes?dimension=0`).then((res
     alert("Minecraft MTR server is not on, or the address is wrong.\nPlease load a file from your disk as an alternative.");
     shadow0.style.display = "none";
 }).then(() => {
-    // fetch(`http://${MTR_URL}/mtr/api/map/departures`).then((response) => {
-    //     return response.json();
-    // }).then((data) => {
-    //     if (data.code !== 200) {
-    //         alert("Failed to fetch data from server.");
-    //         return;
-    //     }
-    //     const T = data.data.cachedResponseTime;
-    //     data.data.departures.forEach((deps) => {
-    //         const routeId = deps.id;
-    //         const deptimes = [];
-    //         deps.departures.forEach((dep) => {
-    //             const deviation = dep.deviation || 0;
-    //             const times = dep.departures.map((t) => (T + t) % 86400000);
-    //             deptimes.push(...times);
-    //         });
-    //         deptimes.sort((a, b) => a - b);
-    //         console.log(`Route ${Routes[routeId].name} has ${deptimes.map(parseTime)} departures.`);
-    //         Routes[routeId].setStartTime(deptimes);
-    //     });
-
-    // });
+    fetch(`http://${MTR_URL}/mtr/api/map/departures`).then((response) => {
+        return response.json();
+    }).then((data) => {
+        if (data.code !== 200) {
+            alert("Failed to fetch data from server.");
+            return;
+        }
+        const T = data.data.cachedResponseTime;
+        data.data.departures.forEach((deps) => {
+            const routeId = deps.id;
+            const deptimes = [];
+            deps.departures.forEach((dep) => {
+                const deviation = dep.deviation || 0;
+                const times = dep.departures.map((t) => (T + t - Routes[routeId].getDuration()) % 86400000);
+                deptimes.push(...times);
+            });
+            deptimes.sort((a, b) => a - b);
+            Routes[routeId].setStartTime(deptimes);
+        });
+        initFollowRelations();
+        checkData();
+    });
 });
