@@ -119,6 +119,10 @@ class Route {
         });
     }
 
+    offsetStartTime(offset) {
+        this.setStartTime(this.startTime.map(t => t + offset));
+    }
+
     getArrivalTime() {
         if (this.timelines.length === 0) {
             return 0;
@@ -478,7 +482,14 @@ function gatherPlatforms(stationId) {
     return platforms;
 }
 
-function checkStation(stationId) {
+/**
+ * Checks a station for scheduling conflicts.
+ * @param {string} stationId 
+ * @param {Object<string, string>} vars 
+ * @param {Set<string>} cons 
+ * @returns {Array<Object>} Array of issues found
+ */
+function checkStation(stationId, vars, cons) {
     const platforms = gatherPlatforms(stationId);
     let issues = [];
     Object.keys(platforms).forEach((platformName) => {
@@ -509,13 +520,32 @@ function checkStation(stationId) {
                     ` and route %${allTimes[i].routeId}% (${parseTime(allTimes[i].start)} - ${parseTime(allTimes[i].end)})`,
                     stationId: stationId,
                 });
-            }else if(allTimes[i].start - allTimes[i - 1].end < 60000) {
+            }else if(allTimes[i].start - allTimes[i - 1].end <= 59000) {
                 issues.push({
                     type: "warning",
                     message: `Platform ${platformName} has very short gap (<60s) between route %${allTimes[i - 1].routeId}% (${parseTime(allTimes[i - 1].start)} - ${parseTime(allTimes[i - 1].end)})` +
                         ` and route %${allTimes[i].routeId}% (${parseTime(allTimes[i].start)} - ${parseTime(allTimes[i].end)})`,
                     stationId: stationId,
                 });
+            }
+            let a0 = Routes[allTimes[i - 1].routeId].depots;
+            a0 = a0.length === 0 ? "(Unknown)" : a0[0];
+            if(!vars[a0]) {
+                vars[a0] = `x${Object.keys(vars).length + 1}`;
+            }
+            let b0 = Routes[allTimes[i].routeId].depots;
+            b0 = b0.length === 0 ? "(Unknown)" : b0[0];
+            if(!vars[b0]) {
+                vars[b0] = `x${Object.keys(vars).length + 1}`;
+            }
+
+            const vl = vars[a0], vr = vars[b0];
+
+            // allTimes[i - 1].end + vl + 1s <= allTimes[i].start + vr
+            // Convert to differential constraints
+            const consR = Math.round((allTimes[i].start - allTimes[i - 1].end) / 1000) - 1;
+            if(vl !== vr) {
+                cons.add(`${vl}-${vr}<=${consR}`);
             }
         }
     });
@@ -795,16 +825,139 @@ function transMsg(msg) {
     return msg;
 }
 
+/**
+ * Solve the difference constraints using the Bellman-Ford algorithm.
+ * @param {Object<string, string>} vars - The variables to consider.
+ * @param {Set<string>} cons_set - The constraints to apply.
+ * @returns {[number|null, Object<string, number>|null]} The shortest distances or null if a negative cycle is detected.
+ */
+function solveConstraints(vars, cons_set) {
+    // Bellman-Ford algorithm to solve difference constraints
+    const cons = Array.from(cons_set).map(c => {
+        const match = c.match(/^(\w+)-(\w+)<=(-?\d+)$/);
+        return [match[1], match[2], Number(match[3])];
+    });
+
+    const gl = {};
+    const varList = ["x0", ...Object.values(vars)];
+    gl["x0"] = {};
+    for (const v of varList) {
+        if (v !== "x0") {
+            gl["x0"][v] = 0;
+            gl[v] = {};
+        }
+    }
+    for (const [u, v, weight] of cons) {
+        if (!gl[v][u] || gl[v][u] > weight) gl[v][u] = weight;
+    }
+
+    const N = varList.length;
+
+    function trySolve(weight_bias) {
+        const dist = new Map(varList.map(v => [v, Infinity]));
+
+        dist.set("x0", 0);
+        for (let i = 0; i < N; i++) {
+            for (const u of varList) {
+                for (const v of Object.keys(gl[u])) {
+                    const weight = (u === 0 ? gl[u][v] : (gl[u][v] - weight_bias));
+                    if (dist.get(v) > dist.get(u) + weight) {
+                        dist.set(v, dist.get(u) + weight);
+                    }
+                }
+            }
+        }
+
+        // Check for negative-weight cycles
+        for (const u of varList) {
+            for (const v of Object.keys(gl[u])) {
+                const weight = (u === 0 ? gl[u][v] : (gl[u][v] - weight_bias));
+                if (dist.get(v) > dist.get(u) + weight) {
+                    return null; // Negative cycle detected
+                }
+            }
+        }
+
+        return dist;
+    }
+
+    let l = 0, r = 300, ans = null, ans_dist = null;
+    while (l < r) {
+        let mid = Math.floor((l + r) / 2);
+        let dist = trySolve(mid);
+        if (dist != null) {
+            ans = mid;
+            ans_dist = dist;
+            l = mid + 1;
+        } else {
+            r = mid;
+        }
+    }
+
+    if (ans === null || ans_dist === null) {
+        return [null, null];
+    }
+
+    const min_val = Math.min(...Array.from(ans_dist.values()));
+    const ret = {};
+    for (const [k, v] of ans_dist) {
+        ret[k] = v;
+    }
+    return [ans, ret];
+}
+
 function checkData() {
     routeView.style.display = "none";
     stationView.style.display = "none";
     depotView.style.display = "none";
     issueView.style.display = "block";
 
+    let vars = {}; // Variables for routes
+    let cons = new Set(); // Constraints
     let issues = [];
     Object.keys(Stations).forEach(stationId => {
-        issues = issues.concat(checkStation(stationId));
+        issues = issues.concat(checkStation(stationId, vars, cons));
     });
+    console.log("Variables:", vars);
+    console.log("Constraints:", cons);
+    const [maxgap, result] = solveConstraints(vars, cons);
+    const solutionStatus = document.getElementById("solution-status");
+    if (result !== null && maxgap !== null) {
+        var offset_strs = [];
+        const to_add = [];
+        solutionStatus.innerHTML = "";
+        Object.keys(vars).forEach(depotName => {
+            const v = vars[depotName];
+            const offset = result[v];
+            if (offset !== 0) {
+                if (offset > 0) {
+                    to_add.push(`<li>${depotName}: ` + 
+                        `Delay ${offset} second(s). (+${parseTime(offset * 1000)})</li>`);
+                    offset_strs.push(`'${depotName}':${-offset}`);
+                } else {
+                    to_add.push(`<li>${depotName}: ` + 
+                        `Advance ${-offset} second(s). (-${parseTime((-offset) * 1000)})</li>`);
+                    offset_strs.push(`'${depotName}':${-offset}`);
+                }
+                offset_strs.push(`'${depotName}':${offset}`);
+            }
+        });
+        to_add.sort();
+        if(to_add.length === 0) {
+            if(maxgap < 60) {
+                to_add.push("<li>All departure times are properly arranged, but there are some gaps smaller than 60 seconds.</li>");
+            } else {
+                to_add.push("<li>All departure times are properly arranged. No adjustment needed.</li>");
+            }
+            to_add.push(`<li><span>Max Gap: ${maxgap} seconds </span></li>`);
+        }else{
+            to_add.push(`<li><span>Max Gap: ${maxgap} seconds </span><a href="javascript:implementOffset({${offset_strs.join(",")}})" class='route-item-link'>Offset</a></li>`);
+        }
+        solutionStatus.innerHTML = to_add.join("");
+    } else {
+        solutionStatus.innerHTML = `<li style="color: red;">Fail to arrange the departure times. Please adjust the route duration or platform dwell time.</li>`;
+    }
+
     const issueList = document.getElementById("issue-list");
     issueList.innerHTML = "";
     if(issues.length === 0) {
@@ -827,6 +980,19 @@ function checkData() {
         });
     }
 
+}
+
+function implementOffset(offsets) {
+    Object.values(Routes).forEach(route => {
+        if (route.depots.length === 0) {
+            return;
+        }
+        const depot = route.depots[0];
+        if (offsets[depot] !== undefined) {
+            route.offsetStartTime(offsets[depot] * 1000);
+        }
+    });
+    checkData();
 }
 
 const shadow0 = document.getElementById('shadow');

@@ -212,6 +212,12 @@ body, html {
     list-style-type: none;
 }
 
+#solution-status li {
+    margin-bottom: 5px;
+    line-height: 1.5em;
+    list-style-type: none;
+}
+
 .issue-error {
     color: red;
     font-weight: bold;
